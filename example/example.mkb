@@ -1,0 +1,26 @@
+files
+{
+    (source)
+	ExamplesMain.cpp
+	libcurl-example.cpp
+    (h)
+	ExamplesMain.h
+	libcurl-example.h
+}
+
+includepath h
+
+# define IW_HTTP_SSL
+
+subprojects
+{
+	iwutil
+	libcurl-airplay
+	iwgx
+}
+
+assets
+{
+	(data)
+ 	splash.jpg
+}
