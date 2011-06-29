@@ -15,7 +15,7 @@ includepath h
 subprojects
 {
 	iwutil
-	CURL
+	libcurl
 	iwgx
 }
 
