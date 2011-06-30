@@ -8,6 +8,7 @@ version 7.21.3.beta4
 options
 {
 	module_path_append="$AIRPLAY_ROOT/modules/third_party"
+	module_path_append="$MARMALADE_ROOT/modules/third_party"
 	strict=0
 	extension=start_configure
 }

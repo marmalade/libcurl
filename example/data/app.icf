@@ -21,11 +21,11 @@ Memsize0=5000000
 SplashscreenBkR=255
 SplashscreenBkG=255
 SplashscreenBkB=255
-Splashscreen=splash.jpg
+#Splashscreen=splash.jpg
 SplashscreenWidth=160
 SplashscreenHeight=100
 
-StackSize=1000000
+#StackSize=1000000
 #ErrorTrace=3
 #APITrace=1
 [GX]

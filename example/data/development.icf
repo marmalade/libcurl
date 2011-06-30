@@ -34,7 +34,7 @@ DeviceClass = 		Type=string, Allowed="UNKNOWN" "SYMBIAN_GENERIC" "SYMBIAN_SERIES
 
 DeviceFPU = 		Type=string, Allowed="None" "VFP Present", Default="VFP Present", Value = "VFP Present"
 
-DeviceFreeRAM = 		Type=int, Min=0.000000, Max=2147483648.000000, Default="1073741824", Value = "1073741824"
+DeviceFreeRAM = 		Type=int, Min=0.000000, Max=2097151.000000, Default="1048576", Value = "1073741824"
 
 DeviceIDInt = 		Type=int, Default="0", Value = "0"
 
@@ -58,7 +58,7 @@ DeviceOSVersionNumber = 		Type=int, Default="0", Value = "0"
 
 DevicePhoneNumber = 		Type=string, Default="0044123456789", Value = "0044123456789"
 
-DeviceTotalRAM = 		Type=int, Min=0.000000, Max=2147483648.000000, Default="1073741824", Value = "1073741824"
+DeviceTotalRAM = 		Type=int, Min=0.000000, Max=2097151.000000, Default="1048576", Value = "1073741824"
 
 DeviceUniqueID = 		Type=string, Default="SIMULATOR_ID", Value = "SIMULATOR_ID"
 
@@ -70,9 +70,11 @@ FileUseSeparateRomRam = 		Type=bool, Default="true", Value = "true"
 
 FileUseTotalStorageSize = 		Type=bool, Default="false", Value = "false"
 
-GLAPI = 		Type=string, Allowed="None" "GLES 1.0 Common-Lite Profile from Imagination POWERVR(TM)" "GLES 1.1 Common-Lite Profile from Imagination POWERVR(TM)" "GLES 1.0 Common Profile from Imagination POWERVR(TM)" "GLES 1.1 Common Profile from Imagination POWERVR(TM)" "GLES 2.0 from Imagination POWERVR(TM)" "Obey [S3E] GLESVersion .icf setting" "GLES 1.1 Common Profile from Qualcomm Snapdragon(TM)" "GLES 2.0 from Qualcomm Snapdragon(TM)", Default="Obey [S3E] GLESVersion .icf setting", Value = "Obey [S3E] GLESVersion .icf setting"
+GLAPI = 		Type=string, Allowed="None" "GLES 1.0 Common-Lite Profile from Imagination POWERVR(TM)" "GLES 1.1 Common-Lite Profile from Imagination POWERVR(TM)" "GLES 1.0 Common Profile from Imagination POWERVR(TM)" "GLES 1.1 Common Profile from Imagination POWERVR(TM)" "GLES 2.0 from Imagination POWERVR(TM)" "Obey [S3E] SysGlesVersion .icf setting" "GLES 1.1 Common Profile from Qualcomm Snapdragon(TM)" "GLES 2.0 from Qualcomm Snapdragon(TM)", Default="Obey [S3E] SysGlesVersion .icf setting", Value = "Obey [S3E] SysGlesVersion .icf setting"
 
 GLDontUseHiddenWindow = 		Type=bool, Default="false", Value = "false"
+
+GLTerminateOnSuspend = 		Type=bool, Default="false", Value = "false"
 
 GLUsePVRVFrame = 		Type=bool, Default="false", Value = "false"
 
@@ -138,6 +140,10 @@ SocketNetworkLoss = 		Type=bool, Default="false", Value = "false"
 
 SocketNetworkType = 		Type=string, Allowed="NONE" "UNKNOWN" "LAN" "WLAN" "GPRS" "UMTS" "EVDO" "CDMA2000" "HSDPA", Default="LAN", Value = "LAN"
 
+SocketRecvLimit = 		Type=int, Min=0.000000, Max=1000000.000000, Default="0", Value = "0"
+
+SocketSendLimit = 		Type=int, Min=0.000000, Max=1000000.000000, Default="0", Value = "0"
+
 SoundEnabled = 		Type=bool, Default="true", Value = "true"
 
 SoundLatency = 		Type=int, Min=20.000000, Max=1400.000000, Default="120", Value = "120"
@@ -170,7 +176,15 @@ SurfaceUseMultiBuffers = 		Type=bool, Default="true", Value = "true"
 
 SurfaceWidth = 		Type=int, Min=128.000000, Max=4096.000000, Default="320", Value = "320"
 
-TimerLocaltimeOffsetHours = 		Type=int, Min=-12.000000, Max=12.000000, Default="0", Value = "0"
+SymbianSoundLatency = 		Type=int, Min=20.000000, Max=1400.000000, Default="120", Value = "120"
+
+ThreadEnabled = 		Type=bool, Default="true", Value = "true"
+
+TimerAccuracy = 		Type=int, Min=0.000000, Max=1000.000000, Default="0", Value = "0"
+
+TimerHiRes = 		Type=bool, Default="false", Value = "false"
+
+TimerLocaltimeOffsetHours = 		Type=string, Allowed="-12" "-11" "-10" "-9" "-8" "-7" "-6" "-5" "-4" "-3" "-2" "-1" "0" "+1" "+2" "+3" "+4" "+5" "+6" "+7" "+8" "+9" "+10" "+11" "+12" "+13" "SYSTEM", Default="SYSTEM", Value = "SYSTEM"
 
 VibraEnabled = 		Type=bool, Default="true", Value = "true"
 
