@@ -15,3 +15,7 @@ Custom c-ares asynchronous resolver replacement has been added to utilize s3eLoo
 The included example will get two files from the Internet.
 
 NOTE: needs a Configure-Extension for Marmalade/AirplaySDK!
+
+------
+Add this to sources.list:
+https://github.com/gamemaster101gr/libcurl/raw/master
