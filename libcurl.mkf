@@ -5,6 +5,11 @@ options
 	strict=0
 }
 
+packages
+{
+	zlib
+}
+
 subprojects
 {
 	zlib
