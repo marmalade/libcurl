@@ -1,6 +1,6 @@
 Package: libcurl
 Version: 7.21.3.beta4
-Revision: 1
+Revision: 2
 Maintainer: Game Master <gamemaster@101gr.com>
 Description: |
  libcurl
@@ -15,3 +15,4 @@ Contents:
 - setup.h
 - upstream
 - fake-ares
+- curl
