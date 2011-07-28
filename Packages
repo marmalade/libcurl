@@ -1,0 +1,23 @@
+# Marmalade developer package listing.
+# Generted by mdev v0.2.
+# The format of this file is similar but not identical to that used by debian's apt.
+Package-Format: 2
+Package: libcurl
+Version: 7.21.3.beta4
+Revision: 1
+Maintainer: Game Master <gamemaster@101gr.com>
+Type: platform-independant
+Description: |
+  libcurl
+Built-With: 5.1.0
+Filename: libcurl_7.21.3.beta4-1.mdev
+Size: 3512572
+MD5Sum: 9831710ad086ff490312bd64fdfa82bf
+
+Source: libcurl
+Version: 7.21.3.beta4
+Revision: 1
+Type: platform-independant
+Filename: libcurl_7.21.3.beta4-1.msrc
+Size: 3536207
+MD5Sum: c048eb6ea1afc994b7893f511c718e4d
