@@ -4,20 +4,20 @@
 Package-Format: 2
 Package: libcurl
 Version: 7.21.3.beta4
-Revision: 3
+Revision: 4
 Maintainer: Game Master <gamemaster@101gr.com>
 Description: |
   libcurl
-Built-With: 5.1.0
 Type: platform-independant
-Filename: libcurl_7.21.3.beta4-3.mdev
-Size: 3514503
-MD5Sum: bb0f22d5048630f0b4c4d5c9460e6cd8
+Built-With: 5.1.1
+Filename: libcurl_7.21.3.beta4-4.mdev
+Size: 3537601
+MD5Sum: a64d4ee47b25a836de6f84735b1d94c6
 
 Source: libcurl
 Version: 7.21.3.beta4
-Revision: 3
+Revision: 4
 Type: platform-independant
-Filename: libcurl_7.21.3.beta4-3.msrc
-Size: 3538144
-MD5Sum: a242ca1ffdaa3abed7fba0da14270b3c
+Filename: libcurl_7.21.3.beta4-4.msrc
+Size: 3561145
+MD5Sum: 83ae29b122b7ff23724d8adc51ddde56
