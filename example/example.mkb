@@ -1,8 +1,10 @@
 files
 {
+    ["Example Sources"]
     (source)
 	ExamplesMain.cpp
 	libcurl-example.cpp
+    ["Example Headers"]
     (h)
 	ExamplesMain.h
 	libcurl-example.h

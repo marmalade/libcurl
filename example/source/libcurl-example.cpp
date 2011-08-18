@@ -135,8 +135,8 @@ bool ExampleUpdate()
 		curl_easy_setopt(curl[1], CURLOPT_WRITEFUNCTION, GotData);
 		curl_easy_setopt(curl[1], CURLOPT_WRITEDATA, (void *)&chunk2);
 		curl_easy_setopt(curl[1], CURLOPT_USERAGENT, "libcurl-airplay-agent/1.0");
-		curl_easy_setopt(curl[1],CURLOPT_CONNECTTIMEOUT, 15);
-		curl_easy_setopt(curl[1],CURLOPT_TIMEOUT, 30);
+		curl_easy_setopt(curl[1],CURLOPT_CONNECTTIMEOUT, 1);
+		curl_easy_setopt(curl[1],CURLOPT_TIMEOUT, 3);
 
 		curlm =  curl_multi_init();
 		curl_multi_add_handle(curlm, curl[0]);
