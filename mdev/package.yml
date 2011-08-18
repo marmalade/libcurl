@@ -1,0 +1,18 @@
+Package: libcurl
+Version: 7.21.3.beta4
+Revision: 4
+Maintainer: Game Master <gamemaster@101gr.com>
+Description: |
+ libcurl
+Homepage: https://github.com/marmalade/libcurl
+Type: platform-independant
+Contents:
+- configure.py 
+- curl_config.h 
+- curlbuild.h 
+- libcurl.mkf 
+- README.txt 
+- setup.h
+- upstream
+- fake-ares
+- curl
