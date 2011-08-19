@@ -6,7 +6,7 @@ applications.
 
 The source is downloaded from:
 
-    http://curl.haxx.se/download/curl-7.21.3.tar.gz
+    http://curl.haxx.se/download/curl-7.21.7.tar.gz
 
 Compilation requires some patches included into the package.
 
