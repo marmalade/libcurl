@@ -1,0 +1,14 @@
+# Project file to bild fake c-ares replacement using s3e native name resolver
+
+
+includepaths
+{
+	"."
+}
+
+files
+{
+	ares.h
+	ares_version.h
+	fake-ares.cpp
+}

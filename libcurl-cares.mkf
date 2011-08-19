@@ -2,10 +2,10 @@
 
 upstream
 {
-	url="http://curl.haxx.se/download/curl-7.21.3.tar.gz"
+	url="http://curl.haxx.se/download/curl-7.21.7.tar.gz"
 }
 
-version 7.21.3.beta5
+version 7.21.7.beta1
 
 packages
 {
@@ -76,18 +76,18 @@ files
 	gtls.c
 	hash.c
 	hmac.c
-	hostares.c
+	asyn-ares.c
 	hostasyn.c
 	hostip.c
 	hostip4.c
 	hostip6.c
 	hostsyn.c
-	hostthre.c
 	http.c
 	http_chunks.c
 	http_digest.c
 	http_negotiate.c
 	http_ntlm.c
+	http_proxy.c
 	if2ip.c
 	imap.c
 	inet_ntop.c
@@ -181,6 +181,7 @@ files
 	http_digest.h
 	http_negotiate.h
 	http_ntlm.h
+	http_proxy.h
 	if2ip.h
 	imap.h
 	inet_ntop.h
@@ -237,5 +238,4 @@ files
 	multi.h
 	stdcheaders.h
 	typecheck-gcc.h
-	types.h
 }
