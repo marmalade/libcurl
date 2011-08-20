@@ -2,6 +2,9 @@
 
 #include "libcurl-example.h"
 #include <string>
+#include <set>
+#include <map>
+#include <list>
 #include "s3eMemory.h"
 #include "ExamplesMain.h"
 #include "IwGx.h"
@@ -13,173 +16,330 @@
 
 enum HTTPStatus
 {
-	kStarting,
 	kNone,
+	kStarting,
 	kDownloading,
-	kFinalizing,
 	kOK,
 	kError,
-	kNext,
-	kNextError,
 };
 
-struct MemoryStruct {
-  char *memory;
-  size_t size;
+const char *HTTPStatusName[] = {
+	"None",
+	"Starting",
+	"Downloading",
+	"OK",
+	"Error",
+	0
 };
 
-#define HTTP_URI "http://http-test.ideaworks3d.net/example.txt"
-#define HTTP_URI2 "http://www.doroga.tv/robots.txt"
+class Request {
+	CURL *curl;
+	HTTPStatus state;
+	CURLcode errcode;
+	std::string url;
+	std::string content;
+	std::string errmsg;
+	bool canceling;
+public:
+	Request(const char *a_url)
+		: curl(0),state(kNone),errcode(CURLE_OK),url(a_url),canceling(false)
+	{
+	}
+	virtual ~Request()
+	{
+		cleanup();
+	}
+	CURL *start(CURLSH *curlsh) {
+		state = kStarting;
+		curl = curl_easy_init();	
+		curl_easy_setopt(curl, CURLOPT_URL, url);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Request::GotData);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)this);
+		curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-airplay-agent/1.0");
+		curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT, 15);
+		curl_easy_setopt(curl,CURLOPT_TIMEOUT, 30);
+		curl_easy_setopt(curl,CURLOPT_NOPROGRESS, 0);
+		//curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 0);
+		curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 1);
+		curl_easy_setopt(curl,CURLOPT_PROGRESSFUNCTION, Request::GotProgressStatic);
+		curl_easy_setopt(curl,CURLOPT_PROGRESSDATA, (void *)this);
+		if( curlsh )
+			curl_easy_setopt(curl,CURLOPT_SHARE,curlsh);
+		return curl;
+	}
+	void cleanup() {
+		if( curl ) {
+			curl_easy_cleanup(curl);
+		}
+		curl = 0;
+		errmsg = "";
+		content = "";
+		url = "";
+		state = kNone;
+		canceling = false;
+	}
+	void got_started() {
+		state = kDownloading;
+	}
+	void got_error(CURLcode code,const char *msg) {
+		errmsg = msg;
+		errcode = code;
+		curl_easy_cleanup(curl);
+		curl = 0;
+		state = kError;
+		canceling = false;
+	}
+	void got_done() {
+		errmsg = "";
+		errcode = CURLE_OK;
+		curl_easy_cleanup(curl);
+		curl = 0;
+		state = kOK;
+		canceling = false;
+	}
+	void cancel() {
+		canceling = true;
+	}
+	CURL *get_curl() const { return curl; }
+	std::string get_url() const { return url; }
+	std::string get_content() const { return content; }
+	size_t get_content_length() const { return content.size(); }
+	std::string get_errmsg() const { return errmsg; }
+	CURLcode get_errcode() const { return errcode; }
+	HTTPStatus get_state() const { return state; }
+private:
+	static size_t GotData(void *ptr, size_t size, size_t nmemb, void *data)
+	{
+	  size_t realsize = size * nmemb;
+	  Request *mem = (Request *)data;
+	  return mem->GotContent(ptr,realsize);
+	}
+	size_t GotContent(void *ptr,size_t size) {
+		content += std::string((char *)ptr,size);
+		return size;
+	}
+	static int GotProgressStatic(void *clientp,double dltotal,double dlnow,double ultotal,double ulnow)
+	{
+		Request *mem = (Request *)clientp;
+		return mem->GotProgress(dltotal,dlnow,ultotal,ulnow);
+	}
+	int GotProgress(double dltotal,double dlnow,double ultotal,double ulnow)
+	{
+		return canceling ? 1:0;
+	}
+};
 
-CURL *curl[] = { 0, 0 }; // we are testing the only two connetions, but it might be much more
-CURLM *curlm = 0;
-const char *errmsg = "";
-uint32 len = 0;
-HTTPStatus status = kStarting;
-struct MemoryStruct chunk = { 0, 0 }; // the real application needs more accurate code
-struct MemoryStruct chunk2 = { 0, 0 }; // the real application needs more accurate code
-int still_running=-1; /* keep number of running handles */
+class RequestManager {
+	std::map<CURL *,Request *> request_map;
+	std::list<Request *> queue;
+	CURLM *curlm;
+	CURLSH *curlsh;
+	size_t max_handles;
+public:
+	RequestManager(size_t a_max_handles)
+		: curlm(0),curlsh(0),max_handles(a_max_handles)
+	{
+	}
+	size_t get_max_handles() const { return max_handles; }
+	CURLM *start()
+	{
+		curlsh = curl_share_init();
+		curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
+		curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_DNS);
+		return curlm = curl_multi_init();
+	}
+	CURLM *get_curlm() const {
+		return curlm;
+	}
+	void get(const char *url) {
+		Request *r = new Request(url);
+		queue.push_back(r);
+	}
+	void step() {
+		if( !curlm ) {
+			printf("CURLM SHOULD BE INITIALIZED, call start() before!!!\n");
+			return;
+		}
+		int handles = 0;
+		CURLMcode code = CURLM_OK;
+		while( (code = curl_multi_perform(curlm, &handles)) == CURLM_CALL_MULTI_PERFORM )
+			;
+		if( code != CURLM_OK ) {
+			printf("SOMETHING BAD HAPPENS: %d!!!\n",code);
+			return;
+		}
 
-static size_t
-GotData(void *ptr, size_t size, size_t nmemb, void *data)
+		CURLMsg *msg; /* for picking up messages with the transfer status */
+		int msgs_left; /* how many messages are left */
+
+		while ((msg = curl_multi_info_read(curlm, &msgs_left))) {
+			if (msg->msg == CURLMSG_DONE) {
+				CURLcode result = msg->data.result;
+				CURL *handle = msg->easy_handle;
+				std::map<CURL *,Request *>::iterator e = request_map.end();
+				std::map<CURL *,Request *>::iterator f = request_map.find(handle);
+				if( f == e ) {
+					printf("REQUEST NOT FOUND FOR HANDLE %p\n",handle);
+					continue;
+				}
+				curl_multi_remove_handle(curlm, handle);
+				if( result != CURLE_OK ) {
+					f->second->got_error(result,curl_easy_strerror(result));
+				} else {
+					f->second->got_done();
+				}
+				request_map.erase(f);
+			}
+		}
+
+		if( (size_t)handles >= max_handles ) {
+			return;
+		}
+
+		// select a new request to start
+		std::list<Request *>::iterator e = queue.end();
+		std::list<Request *>::iterator i = queue.begin();
+
+		for( ; i != e; i++ ) {
+			if( (*i)->get_state() == kNone )
+				break;
+		}
+		// start found request
+		if( i != e && (*i)->get_state() == kNone ) {
+			// new request found
+			CURL *handle = (*i)->start(curlsh);
+			curl_multi_add_handle(curlm, handle);
+			request_map[handle] = *i;
+			(*i)->got_started();
+		}
+	}
+	const std::list<Request *> &get_queue() const { return queue; }
+	bool clean(Request *r) {
+		switch(r->get_state()) {
+		case kStarting:
+		case kDownloading:
+			r->cancel();
+			return false; // not in this state - cancel request before
+		case kNone:
+		case kOK:
+		case kError:
+			{
+				std::list<Request *>::iterator e = queue.end();
+				std::list<Request *>::iterator i = queue.begin();
+				for( ; i != e; i++) {
+					if( (*i) == r ) {
+						break;
+					}
+				}
+				if( i == e ) {
+					printf("REQUEST LIST BAD FOR REQUEST %p WHILE CLEAN\n",r);
+					break;
+				}
+				delete r;
+				queue.erase(i);
+			}
+			break;
+		}
+		return true;
+	}
+	size_t active_requests() {
+		return request_map.size();
+	}
+	void stop() {
+		{
+			std::map<CURL *,Request *>::iterator e = request_map.end();
+			std::map<CURL *,Request *>::iterator i = request_map.begin();
+			for( ; i != e; i++ ) {
+				i->second->cancel();
+			}
+		}
+		while( active_requests() ) {
+			step();
+		}
+		curl_multi_cleanup(curlm);
+		curlm = 0;
+	}
+};
+
+class TileMatrix
 {
-  size_t realsize = size * nmemb;
-  struct MemoryStruct *mem = (struct MemoryStruct *)data;
-  mem->memory = (char*)realloc(mem->memory, mem->size + realsize + 1);
-  if (mem->memory == NULL) {
-    printf("not enough memory (realloc returned NULL)\n");
-    exit(EXIT_FAILURE);
-  }
- 
-  memcpy(&(mem->memory[mem->size]), ptr, realsize);
-  mem->size += realsize;
-  mem->memory[mem->size] = 0;
+	int x_min,y_min;
+	int x_max,y_max;
+	int z,x,y;
+public:
+	TileMatrix(int ax_min,int ay_min,int ax_max,int ay_max,int az)
+		: x_min(ax_min),y_min(ay_min),
+		x_max(ax_max),y_max(ay_max),
+		z(az),x(ax_min),y(ay_min)
+	{
+	}
+	int get_x() const { return x; }
+	int get_y() const { return y; }
+	int get_z() const { return z; }
+	void step() {
+		if( ++x >= x_max ) {
+			x = x_min;
+			if( ++y >= y_max ) {
+				y = y_min;
+			}
+		}
+	}
+};
 
-  return realsize;
-}
+//#define HTTP_TILES "http://tile.openstreetmap.org/%d/%d/%d.png" // tile z,x,y
+//#define HTTP_TILES "http://78.40.184.246/jams/%d/%d/%d.png" // tile z,x,y
+//#define HTTP_TILES "http://jams1.doroga.tv/jams/%d/%d/%d.png" // tile z,x,y
+#define HTTP_TILES "http://jams.doroga.tv/jams/%d/%d/%d.png" // tile z,x,y
 
-int ExampleReset(void *,void *);
-int ExampleStart(void *,void *)
-{
-	curl_global_init(CURL_GLOBAL_ALL);
-	return ExampleReset(0,0);
-}
+RequestManager manager(3);
+TileMatrix matrix(10189,5076,10192,5080,14);
+
 //-----------------------------------------------------------------------------
 void ExampleInit()
 {
     IwGxInit();
-	s3eTimerSetTimer(5000,ExampleStart,0);
+	curl_global_init(CURL_GLOBAL_ALL);
+	manager.start();
 }
 
 //-----------------------------------------------------------------------------
 void ExampleShutDown()
 {
-	if (curl[0]) 
-	{
-		curl_easy_cleanup(curl[0]);
-		curl_easy_cleanup(curl[1]);
-	}
-    if (curlm) 
-		curl_multi_cleanup(curlm);
-
-	free(chunk.memory);
-	free(chunk2.memory);
+	manager.stop();
 	curl_global_cleanup();
 	IwGxTerminate();
-}
-//-----------------------------------------------------------------------------
-int ExampleReset(void *,void *)
-{
-    if (curlm) 
-		curl_multi_cleanup(curlm);
-
-	curlm = NULL;
-
-	if (curl[0]) curl_easy_cleanup(curl[0]);
-	if (curl[1]) curl_easy_cleanup(curl[1]);
-	curl[0] = curl[1] = NULL;
-
-	if(chunk.memory) free(chunk.memory);
-	if(chunk2.memory) free(chunk2.memory);
-	memset(&chunk,0,sizeof(chunk));
-	memset(&chunk2,0,sizeof(chunk));
-	status = kNone;
-	still_running=-1;
-	return 0;
 }
 
 bool ExampleUpdate()
 {
-	if(status == kNone)
-	{
-		// The starting point, transfer initialization
-
-		chunk.memory = (char*)malloc(1);  /* will be grown as needed by the realloc above */ 
-		chunk.memory[0] = 0;
-		chunk.size = 0;    /* no data at this point */ 
-
-		chunk2.memory = (char*)malloc(1);  /* will be grown as needed by the realloc above */ 
-		chunk2.memory[0] = 0;
-		chunk2.size = 0;    /* no data at this point */ 
-
-		curl[0] = curl_easy_init();	
-		curl_easy_setopt(curl[0], CURLOPT_URL, HTTP_URI);
-		curl_easy_setopt(curl[0], CURLOPT_WRITEFUNCTION, GotData);
-		curl_easy_setopt(curl[0], CURLOPT_WRITEDATA, (void *)&chunk);
-		curl_easy_setopt(curl[0], CURLOPT_USERAGENT, "libcurl-airplay-agent/1.0");
-		curl_easy_setopt(curl[0],CURLOPT_CONNECTTIMEOUT, 15);
-		curl_easy_setopt(curl[0],CURLOPT_TIMEOUT, 30);
-
-		curl[1] = curl_easy_init();	
-		curl_easy_setopt(curl[1], CURLOPT_URL, HTTP_URI2);
-		curl_easy_setopt(curl[1], CURLOPT_WRITEFUNCTION, GotData);
-		curl_easy_setopt(curl[1], CURLOPT_WRITEDATA, (void *)&chunk2);
-		curl_easy_setopt(curl[1], CURLOPT_USERAGENT, "libcurl-airplay-agent/1.0");
-		curl_easy_setopt(curl[1],CURLOPT_CONNECTTIMEOUT, 1);
-		curl_easy_setopt(curl[1],CURLOPT_TIMEOUT, 3);
-
-		curlm =  curl_multi_init();
-		curl_multi_add_handle(curlm, curl[0]);
-		curl_multi_add_handle(curlm, curl[1]);
-
-		// first start
-		curl_multi_perform(curlm, &still_running);
-	    status = kDownloading;
-		if(!still_running)
-			status = kFinalizing;
+	manager.step();
+	if( manager.get_queue().size() < 20 ) {
+		char buf[256];
+		sprintf(buf,HTTP_TILES,matrix.get_z(),matrix.get_x(),matrix.get_y());
+		manager.get(buf);
+		matrix.step();
 	}
-	if(status == kDownloading)
-	{
-		curl_multi_perform(curlm, &still_running);
-		if(!still_running)
-			status = kFinalizing;
-	}
-    else if(status == kFinalizing)
-    {
-	  CURLMsg *msg; /* for picking up messages with the transfer status */
-	  int msgs_left; /* how many messages are left */
-	  status = kOK;
-	  while ((msg = curl_multi_info_read(curlm, &msgs_left))) {
-		if (msg->msg == CURLMSG_DONE) {
-			if( msg->data.result != CURLE_OK ) {
-				status = kError;
-				errmsg = curl_easy_strerror(msg->data.result);
+	if( manager.active_requests() < manager.get_max_handles() ) {
+		std::list<Request *>::const_iterator e = manager.get_queue().end();
+		std::list<Request *>::const_iterator i = manager.get_queue().begin();
+		for( ; i != e; i++ ) {
+			if( (*i)->get_state() == kOK || (*i)->get_state() == kError ) {
+				manager.clean(*i);
 				break;
 			}
 		}
-	  }
-    }
-    else if(status == kOK )
-    {
-		status = kNext;
-		s3eTimerSetTimer(2000,ExampleReset,0);
-    }
-    else if(status == kError )
-    {
-		status = kNextError;
-		s3eTimerSetTimer(2000,ExampleReset,0);
-    }
-    
+	}
+	if( s3ePointerGetState(S3E_POINTER_BUTTON_SELECT) & S3E_POINTER_STATE_PRESSED ) {
+		// random cancel
+		std::list<Request *>::const_iterator e = manager.get_queue().end();
+		std::list<Request *>::const_iterator i = manager.get_queue().begin();
+		for( ; i != e; i++ ) {
+			if( (*i)->get_state() == kDownloading ) {
+				(*i)->cancel();
+				break;
+			}
+		}
+	}
 	return true;
 }
 
@@ -190,53 +350,20 @@ void ExampleRender()
 	IwGxClear( IW_GX_COLOUR_BUFFER_F | IW_GX_DEPTH_BUFFER_F );
 	// Render text
 
-	if( status == kOK || status == kNext )
-	{
-	    char buf[512];
-	    
-        if (chunk.memory && chunk.size > 1)
-        {
-			snprintf(buf, 500, "1) -> %s", chunk.memory);
-		    IwGxPrintString(10, 40, buf, 1);
-		}
-        if (chunk2.memory && chunk2.size > 1)
-        {
-			snprintf(buf, 500, "2) -> %s", chunk2.memory);
-		    IwGxPrintString(10, 50, buf, 1);
-		}
-	}
-	
-	if(status == kStarting)
-	{
-        IwGxPrintString(10, 20, "Starting ...", 1);
-    }
-	else if(status == kError)
-	{
-        IwGxPrintString(10, 20, "Error!", 1);
-        IwGxPrintString(10, 30, errmsg, 1);
-    }
-	else if(status == kNextError)
-	{
-        IwGxPrintString(10, 20, "Error! - waiting next ...", 1);
-        IwGxPrintString(10, 30, errmsg, 1);
-    }
-	else if(status == kFinalizing)
-	{
-        IwGxPrintString(10, 20, "Finalizing...", 1);
-    }
-	else if(status == kOK)
-	{
-        IwGxPrintString(10, 20, "OK!", 1);
-    }
-	else if(status == kNext)
-	{
-        IwGxPrintString(10, 20, "OK! - waiting next ...", 1);
-    }
-	else
-	{
-	    IwGxPrintString(10, 20, "Connecting...", 1);
-	}
+	int sx = 10;
+	int sy = 40;
 
+	std::list<Request *>::const_iterator e = manager.get_queue().end();
+	std::list<Request *>::const_iterator i = manager.get_queue().begin();
+	int count = 0;
+	for( ; i != e; i++ ) {
+		char buf[1024];
+		const char *name = HTTPStatusName[(*i)->get_state()];
+		snprintf(buf, 1023, "%d) %s: %s/%d (%s)",count,(*i)->get_url().c_str(),name,(*i)->get_content_length(),(*i)->get_errmsg().c_str());
+	    IwGxPrintString(sx, sy, buf, true);
+		sy += 20;
+		count++;
+	}
 	// Swap buffers
 	IwGxFlush();
 	IwGxSwapBuffers();
