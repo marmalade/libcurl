@@ -10,7 +10,6 @@ version 7.21.7.beta1
 packages
 {
 	zlib
-	c-ares
 }
 
 options
@@ -24,7 +23,7 @@ options
 subprojects
 {
 	zlib
-	c-ares
+	fake-ares
 }
 
 includepaths
@@ -32,7 +31,6 @@ includepaths
 	"."
 	"upstream/include"
 	"upstream/lib"
-	#"fake-ares"
 }
 
 defines

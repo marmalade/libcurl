@@ -25,4 +25,5 @@ assets
 {
 	(data)
  	splash.jpg
+	etc/resolv.conf
 }

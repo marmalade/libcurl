@@ -52,14 +52,13 @@ public:
 	CURL *start(CURLSH *curlsh) {
 		state = kStarting;
 		curl = curl_easy_init();	
-		curl_easy_setopt(curl, CURLOPT_URL, url);
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Request::GotData);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)this);
 		curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-airplay-agent/1.0");
 		curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT, 15);
 		curl_easy_setopt(curl,CURLOPT_TIMEOUT, 30);
 		curl_easy_setopt(curl,CURLOPT_NOPROGRESS, 0);
-		//curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 0);
 		curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 1);
 		curl_easy_setopt(curl,CURLOPT_PROGRESSFUNCTION, Request::GotProgressStatic);
 		curl_easy_setopt(curl,CURLOPT_PROGRESSDATA, (void *)this);

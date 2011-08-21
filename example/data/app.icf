@@ -30,3 +30,6 @@ SplashscreenHeight=100
 #APITrace=1
 [GX]
 DataCacheSize=48000
+
+[Trace]
+#All=1
