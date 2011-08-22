@@ -10,13 +10,18 @@ The source is downloaded from:
 
 Compilation requires some patches included into the package.
 
-External c-ares asynchronous resolver has been added to the DEFAULT build.
+External c-ares asynchronous resolver has been added as an option.
 NOTE THAT THE C-ARES REQUIRES data/etc/resolv.conf FILE EXISTS for Marmalade environment!
 
-Custom c-ares asynchronous resolver replacement may be used to utilize Marmalade-native s3eLookup call.
-Just copy libcurl-fake-ares.mkf to the libcurl.mkf file to attach custom resolver instead of c-ares.
-Original libcurl.mkf is just a copy of the libcurl-cares.mkf.
+Custom asynchronous resolver replacement is used as a DEFAULT option
+to utilize Marmalade-native s3eLookup call.
 
-The included example will get two files from the Internet.
+Copy one of libcurl-fake-ares.mkf or libcurl-cares.mkf to libcurl.mkf file to
+choose appropriate library option.
 
-NOTE: needs a Configure-Extension for Marmalade/AirplaySDK!
+The included example demonstrates power of libcurl downloading lot of files
+using request queue to restrict number of simultaneous downloads.
+
+------------ NOTE -------------------
+The libcurl porting project requires a configure extension for Marmalade/AirplaySDK,
+find it at http://github.com/marmalade/Configure-Extension and install first
