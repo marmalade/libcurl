@@ -1,0 +1,29 @@
+files
+{
+    ["Example Sources"]
+    (source)
+	ExamplesMain.cpp
+	libcurl-example-workaround.cpp
+    ["Example Headers"]
+    (h)
+	ExamplesMain.h
+	libcurl-example.h
+}
+
+includepath h
+
+# define IW_HTTP_SSL
+
+subprojects
+{
+	iwutil
+	libcurl
+	iwgx
+}
+
+assets
+{
+	(data)
+ 	splash.jpg
+	etc/resolv.conf
+}
