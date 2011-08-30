@@ -110,6 +110,7 @@ namespace __ares_internal__ {
 		s3eInetIPAddress result; // 0 - not yet received, s3eInetIPAddress(-1) - error received
 		s3eInetAddress buffer;
 		//int dummy_socket;
+		//int debug_step_counter;
 
 		enum {
 			IDLE = 0,
@@ -153,6 +154,11 @@ namespace __ares_internal__ {
 
 		void check_result(Queue *channel) {
 			if( status == OUTSTANDING ) { // outstanding request
+				//debug_step_counter++;
+				//if( debug_step_counter == 5 ) {
+				//	s3eInetAton(&result,"78.40.184.246");
+				//	debug_step_counter = 0;
+				//}
 				if( (channel == current) && result ) { // result has been just received
 					if( result == s3eInetIPAddress(-1) ) { // error received
 						DebugTracePrintf(("Error happened for:%p",current));
@@ -214,6 +220,7 @@ namespace __ares_internal__ {
 					result = 0;
 					DebugTracePrintf(("New lookup for:%p -> %s",current,c->host.c_str()));
 					s3eInetLookup(c->host.c_str(),&buffer, lookupCallback, this);
+					//debug_step_counter = 0;
 					status = OUTSTANDING;
 				}
 			}
@@ -312,6 +319,28 @@ void ares_gethostbyname(ares_channel channel,
 	Queue *q = (Queue *)channel;
 	q->add(name,s3eTimerGetUTC()+5000,callback,arg);
 	QueueManager::manager()->step(q);
+/*	{
+		// DEBUG
+						hostent ent;
+						//char *hostname = new char[current->first()->host.size()+1];
+						//memcpy(hostname,current->first()->host.c_str(),current->first()->host.size());
+						//hostname[current->first()->host.size()] = 0;
+						//ent.h_name = hostname;
+						ent.h_name = (char *)name;
+						ent.h_length = 4;
+						char *addr_list[2];
+						char *aliases[1] = { NULL };
+						s3eInetIPAddress result;
+						s3eInetAton(&result,"78.40.184.246");
+						addr_list[0] = (char*)&result;
+						addr_list[1] = NULL;
+						ent.h_addr_list = addr_list;
+						ent.h_aliases = aliases;
+						ent.h_addrtype = AF_INET;
+						//current->first_done(ARES_SUCCESS,&ent);
+						callback(arg,ARES_SUCCESS,0,&ent);
+	}
+*/
 }
 
 int ares_getsock(ares_channel channel,

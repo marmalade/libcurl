@@ -106,6 +106,7 @@ public:
 	std::string get_errmsg() const { return errmsg; }
 	CURLcode get_errcode() const { return errcode; }
 	HTTPStatus get_state() const { return state; }
+	bool get_canceling() const { return canceling; }
 private:
 	static size_t GotData(void *ptr, size_t size, size_t nmemb, void *data)
 	{
@@ -200,11 +201,11 @@ public:
 		std::list<Request *>::iterator i = queue.begin();
 
 		for( ; i != e; i++ ) {
-			if( (*i)->get_state() == kNone )
+			if( (*i)->get_state() == kNone && !(*i)->get_canceling() )
 				break;
 		}
 		// start found request
-		if( i != e && (*i)->get_state() == kNone ) {
+		if( i != e && (*i)->get_state() == kNone && !(*i)->get_canceling() ) {
 			// new request found
 			CURL *handle = (*i)->start(curlsh);
 			curl_multi_add_handle(curlm, handle);
@@ -246,10 +247,10 @@ public:
 	}
 	void stop() {
 		{
-			std::map<CURL *,Request *>::iterator e = request_map.end();
-			std::map<CURL *,Request *>::iterator i = request_map.begin();
+			std::list<Request *>::iterator e = queue.end();
+			std::list<Request *>::iterator i = queue.begin();
 			for( ; i != e; i++ ) {
-				i->second->cancel();
+				(*i)->cancel();
 			}
 		}
 		while( active_requests() ) {
@@ -298,7 +299,6 @@ void ExampleInit()
 {
     IwGxInit();
 	curl_global_init(CURL_GLOBAL_ALL);
-	manager.start();
 }
 
 //-----------------------------------------------------------------------------
@@ -309,9 +309,23 @@ void ExampleShutDown()
 	IwGxTerminate();
 }
 
+int ExampleStep = 0;
+
 bool ExampleUpdate()
 {
+	if( ExampleStep >= 30 ) {
+		manager.stop();
+		while( manager.get_queue().begin() != manager.get_queue().end() )
+			manager.clean(*manager.get_queue().begin());
+		ExampleStep = 0;
+	}
+
+	if( !ExampleStep ) {
+		manager.start();
+	}
+
 	manager.step();
+	ExampleStep += 1;
 	if( manager.get_queue().size() < 20 ) {
 		char buf[256];
 		sprintf(buf,HTTP_TILES,matrix.get_z(),matrix.get_x(),matrix.get_y());

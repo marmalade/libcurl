@@ -25,7 +25,7 @@ SplashscreenBkB=255
 SplashscreenWidth=160
 SplashscreenHeight=100
 
-#StackSize=1000000
+SysStackSize=1000000
 #ErrorTrace=3
 #APITrace=1
 [GX]
@@ -33,3 +33,10 @@ DataCacheSize=48000
 
 [Trace]
 #All=1
+SOCKET_VERBOSE=1
+CALLBACKS_VERBOSE=1
+IWCRT=1
+SOCKET=1
+S3E=1
+CORE=1
+FILE=0

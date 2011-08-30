@@ -353,7 +353,7 @@ public:
 //#define HTTP_TILES "http://jams1.doroga.tv/jams/%d/%d/%d.png" // tile z,x,y
 #define HTTP_TILES "http://jams.doroga.tv/jams/%d/%d/%d.png" // tile z,x,y
 
-RequestManager manager(3);
+RequestManager manager(5);
 TileMatrix matrix(10189,5076,10192,5080,14);
 
 //-----------------------------------------------------------------------------
