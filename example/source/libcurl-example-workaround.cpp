@@ -212,8 +212,8 @@ public:
 	size_t get_max_handles() const { return max_handles; }
 	void start()
 	{
-		//curlsh = curl_share_init();
-		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
+		curlsh = curl_share_init();
+		curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
 		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_DNS);
 	}
 	void get(const char *url) {
@@ -320,6 +320,8 @@ public:
 		while( active_requests() ) {
 			step();
 		}
+		curl_share_cleanup(curlsh);
+		curlsh = 0;
 	}
 };
 
@@ -353,7 +355,7 @@ public:
 //#define HTTP_TILES "http://jams1.doroga.tv/jams/%d/%d/%d.png" // tile z,x,y
 #define HTTP_TILES "http://jams.doroga.tv/jams/%d/%d/%d.png" // tile z,x,y
 
-RequestManager manager(5);
+RequestManager manager(3);
 TileMatrix matrix(10189,5076,10192,5080,14);
 
 //-----------------------------------------------------------------------------
@@ -361,7 +363,6 @@ void ExampleInit()
 {
     IwGxInit();
 	curl_global_init(CURL_GLOBAL_ALL);
-	manager.start();
 }
 
 //-----------------------------------------------------------------------------
@@ -372,9 +373,23 @@ void ExampleShutDown()
 	IwGxTerminate();
 }
 
+int ExampleStep = 0;
+
 bool ExampleUpdate()
 {
+	if( ExampleStep >= 30 ) {
+		manager.stop();
+		while( manager.get_queue().begin() != manager.get_queue().end() )
+			manager.clean(*manager.get_queue().begin());
+		ExampleStep = 0;
+	}
+
+	if( ExampleStep == 0 ) {
+		manager.start();
+	}
+
 	manager.step();
+	ExampleStep++;
 	if( manager.get_queue().size() < 20 ) {
 		char buf[256];
 		sprintf(buf,HTTP_TILES,matrix.get_z(),matrix.get_x(),matrix.get_y());
