@@ -64,6 +64,7 @@ public:
 		curl_easy_setopt(curl,CURLOPT_PROGRESSDATA, (void *)this);
 		if( curlsh )
 			curl_easy_setopt(curl,CURLOPT_SHARE,curlsh);
+		curl_easy_setopt(curl,CURLOPT_VERBOSE,1);
 		return curl;
 	}
 	void cleanup() {
@@ -145,7 +146,7 @@ public:
 	{
 		curlsh = curl_share_init();
 		curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
-		curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_DNS);
+		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_DNS);
 		return curlm = curl_multi_init();
 	}
 	CURLM *get_curlm() const {
@@ -258,6 +259,8 @@ public:
 		}
 		curl_multi_cleanup(curlm);
 		curlm = 0;
+		curl_share_cleanup(curlsh);
+		curlsh = 0;
 	}
 };
 
@@ -313,7 +316,7 @@ int ExampleStep = 0;
 
 bool ExampleUpdate()
 {
-	if( ExampleStep >= 30 ) {
+	if( ExampleStep >= 10 ) {
 		manager.stop();
 		while( manager.get_queue().begin() != manager.get_queue().end() )
 			manager.clean(*manager.get_queue().begin());
@@ -321,6 +324,7 @@ bool ExampleUpdate()
 	}
 
 	if( !ExampleStep ) {
+		printf("--------------- STARTING ---------------\n");
 		manager.start();
 	}
 

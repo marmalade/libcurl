@@ -69,6 +69,7 @@ public:
 		curl_easy_setopt(curl,CURLOPT_PROGRESSDATA, (void *)this);
 		if( curlsh )
 			curl_easy_setopt(curl,CURLOPT_SHARE,curlsh);
+		curl_easy_setopt(curl,CURLOPT_VERBOSE,1);
 		curlm = curl_multi_init();
 		curl_multi_add_handle(curlm, curl);
 		got_started();
@@ -212,8 +213,8 @@ public:
 	size_t get_max_handles() const { return max_handles; }
 	void start()
 	{
-		curlsh = curl_share_init();
-		curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
+		//curlsh = curl_share_init();
+		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
 		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_DNS);
 	}
 	void get(const char *url) {
@@ -377,7 +378,7 @@ int ExampleStep = 0;
 
 bool ExampleUpdate()
 {
-	if( ExampleStep >= 30 ) {
+	if( ExampleStep >= 10 ) {
 		manager.stop();
 		while( manager.get_queue().begin() != manager.get_queue().end() )
 			manager.clean(*manager.get_queue().begin());

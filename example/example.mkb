@@ -13,6 +13,7 @@ files
 includepath h
 
 # define IW_HTTP_SSL
+#define DEBUGBUILD=1
 
 subprojects
 {

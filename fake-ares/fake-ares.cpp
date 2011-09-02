@@ -7,6 +7,7 @@
 #include <list>
 #include <vector>
 #include <set>
+#include <map>
 
 #include <s3e.h>
 
@@ -109,6 +110,11 @@ namespace __ares_internal__ {
 		Queue *current;
 		s3eInetIPAddress result; // 0 - not yet received, s3eInetIPAddress(-1) - error received
 		s3eInetAddress buffer;
+		struct DnsCacheEntry {
+			s3eInetIPAddress result;
+			int64 last_update;
+		};
+		std::map<std::string,DnsCacheEntry> dns_cache;
 		//int dummy_socket;
 		//int debug_step_counter;
 
@@ -152,6 +158,33 @@ namespace __ares_internal__ {
 			return s;
 		}
 
+		bool check_cache(const char *name,ares_host_callback callback,void *arg) {
+#ifdef _DEBUG
+			int64 expire = 30 * 1000;
+#else
+			int64 expire = 5 * 60 * 1000;
+#endif
+			if( dns_cache.find(name) != dns_cache.end()
+					&& dns_cache[name].last_update > s3eTimerGetUTC() - expire ) {
+				// fresh DNS entry is returned
+				DebugTracePrintf(("Immediate return from cache for %s",name));
+				hostent ent;
+				s3eInetIPAddress temp_result = dns_cache[name].result;
+				ent.h_name = (char *)name;
+				ent.h_length = 4;
+				char *addr_list[2];
+				char *aliases[1] = { NULL };
+				addr_list[0] = (char*)&temp_result;
+				addr_list[1] = NULL;
+				ent.h_addr_list = addr_list;
+				ent.h_aliases = aliases;
+				ent.h_addrtype = AF_INET;
+				callback(arg,ARES_SUCCESS,0,&ent);
+				return true;
+			}
+			return false;
+		}
+
 		void check_result(Queue *channel) {
 			if( status == OUTSTANDING ) { // outstanding request
 				//debug_step_counter++;
@@ -179,6 +212,8 @@ namespace __ares_internal__ {
 						ent.h_addr_list = addr_list;
 						ent.h_aliases = aliases;
 						ent.h_addrtype = AF_INET;
+						DnsCacheEntry entry = { result, s3eTimerGetUTC() };
+						dns_cache[current->first()->host] = entry;
 						current->first_done(ARES_SUCCESS,&ent);
 						//delete [] hostname;
 					}
@@ -316,6 +351,8 @@ void ares_gethostbyname(ares_channel channel,
                                      ares_host_callback callback,
                                      void *arg)
 {
+	if( QueueManager::manager()->check_cache(name,callback,arg) )
+		return;
 	Queue *q = (Queue *)channel;
 	q->add(name,s3eTimerGetUTC()+5000,callback,arg);
 	QueueManager::manager()->step(q);
