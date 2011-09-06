@@ -34,6 +34,8 @@ const char *HTTPStatusName[] = {
 
 class Request {
 	CURL *curl;
+	CURLM *curlm;
+	curl_slist *headers;
 	HTTPStatus state;
 	CURLcode errcode;
 	std::string url;
@@ -42,7 +44,7 @@ class Request {
 	bool canceling;
 public:
 	Request(const char *a_url)
-		: curl(0),state(kNone),errcode(CURLE_OK),url(a_url),canceling(false)
+		: curl(0),curlm(0),headers(0),state(kNone),errcode(CURLE_OK),url(a_url),canceling(false)
 	{
 	}
 	virtual ~Request()
@@ -51,8 +53,10 @@ public:
 	}
 	CURL *start(CURLSH *curlsh) {
 		state = kStarting;
-		curl = curl_easy_init();	
+		curl = curl_easy_init();
 		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		//headers = curl_slist_append(headers,"Host: jams1.doroga.tv");
+		//curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Request::GotData);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)this);
 		curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-airplay-agent/1.0");
@@ -60,11 +64,15 @@ public:
 		curl_easy_setopt(curl,CURLOPT_TIMEOUT, 30);
 		curl_easy_setopt(curl,CURLOPT_NOPROGRESS, 0);
 		curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 1);
+		//curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 0);
 		curl_easy_setopt(curl,CURLOPT_PROGRESSFUNCTION, Request::GotProgressStatic);
 		curl_easy_setopt(curl,CURLOPT_PROGRESSDATA, (void *)this);
 		if( curlsh )
 			curl_easy_setopt(curl,CURLOPT_SHARE,curlsh);
-		//curl_easy_setopt(curl,CURLOPT_VERBOSE,1);
+		curl_easy_setopt(curl,CURLOPT_VERBOSE,1);
+		curlm = curl_multi_init();
+		curl_multi_add_handle(curlm, curl);
+		got_started();
 		return curl;
 	}
 	void cleanup() {
@@ -72,6 +80,14 @@ public:
 			curl_easy_cleanup(curl);
 		}
 		curl = 0;
+		if( curlm ) {
+			curl_multi_cleanup(curlm);
+		}
+		curlm = 0;
+		if( headers ) {
+			curl_slist_free_all(headers);
+		}
+		headers = 0;
 		errmsg = "";
 		content = "";
 		url = "";
@@ -84,16 +100,36 @@ public:
 	void got_error(CURLcode code,const char *msg) {
 		errmsg = msg;
 		errcode = code;
-		curl_easy_cleanup(curl);
+		if( curl ) {
+			curl_easy_cleanup(curl);
+		}
 		curl = 0;
+		if( curlm ) {
+			curl_multi_cleanup(curlm);
+		}
+		curlm = 0;
+		if( headers ) {
+			curl_slist_free_all(headers);
+		}
+		headers = 0;
 		state = kError;
 		canceling = false;
 	}
 	void got_done() {
 		errmsg = "";
 		errcode = CURLE_OK;
-		curl_easy_cleanup(curl);
+		if( curl ) {
+			curl_easy_cleanup(curl);
+		}
 		curl = 0;
+		if( curlm ) {
+			curl_multi_cleanup(curlm);
+		}
+		curlm = 0;
+		if( headers ) {
+			curl_slist_free_all(headers);
+		}
+		headers = 0;
 		state = kOK;
 		canceling = false;
 	}
@@ -108,6 +144,41 @@ public:
 	CURLcode get_errcode() const { return errcode; }
 	HTTPStatus get_state() const { return state; }
 	bool get_canceling() const { return canceling; }
+	CURLM *get_curlm() const { return curlm; }
+
+	void step() {
+		if( !curl || !curlm )
+			return;
+		switch( state ) {
+		case kNone:
+		case kOK:
+		case kError:
+			return;
+		}
+		int handles = 0;
+		CURLMcode code = CURLM_OK;
+		while( (code = curl_multi_perform(curlm, &handles)) == CURLM_CALL_MULTI_PERFORM )
+			;
+		if( code != CURLM_OK ) {
+			printf("SOMETHING BAD HAPPENS: %d!!!\n",code);
+			return;
+		}
+
+		CURLMsg *msg; /* for picking up messages with the transfer status */
+		int msgs_left; /* how many messages are left */
+
+		while ((msg = curl_multi_info_read(curlm, &msgs_left))) {
+			if (msg->msg == CURLMSG_DONE) {
+				CURLcode result = msg->data.result;
+				curl_multi_remove_handle(curlm, curl);
+				if( result != CURLE_OK ) {
+					got_error(result,curl_easy_strerror(result));
+				} else {
+					got_done();
+				}
+			}
+		}
+	}
 private:
 	static size_t GotData(void *ptr, size_t size, size_t nmemb, void *data)
 	{
@@ -131,73 +202,53 @@ private:
 };
 
 class RequestManager {
-	std::map<CURL *,Request *> request_map;
 	std::list<Request *> queue;
-	CURLM *curlm;
 	CURLSH *curlsh;
 	size_t max_handles;
 public:
 	RequestManager(size_t a_max_handles)
-		: curlm(0),curlsh(0),max_handles(a_max_handles)
+		: curlsh(0),max_handles(a_max_handles)
 	{
 	}
 	size_t get_max_handles() const { return max_handles; }
-	CURLM *start()
+	void start()
 	{
-		curlsh = curl_share_init();
-		curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
+		//curlsh = curl_share_init();
+		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
 		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_DNS);
-		return curlm = curl_multi_init();
-	}
-	CURLM *get_curlm() const {
-		return curlm;
 	}
 	void get(const char *url) {
 		Request *r = new Request(url);
 		queue.push_back(r);
 	}
 	void step() {
-		if( !curlm ) {
-			printf("CURLM SHOULD BE INITIALIZED, call start() before!!!\n");
-			return;
-		}
-		int handles = 0;
-		CURLMcode code = CURLM_OK;
-		while( (code = curl_multi_perform(curlm, &handles)) == CURLM_CALL_MULTI_PERFORM )
-			;
-		if( code != CURLM_OK ) {
-			printf("SOMETHING BAD HAPPENS: %d!!!\n",code);
-			return;
-		}
-
-		CURLMsg *msg; /* for picking up messages with the transfer status */
-		int msgs_left; /* how many messages are left */
-
-		while ((msg = curl_multi_info_read(curlm, &msgs_left))) {
-			if (msg->msg == CURLMSG_DONE) {
-				CURLcode result = msg->data.result;
-				CURL *handle = msg->easy_handle;
-				std::map<CURL *,Request *>::iterator e = request_map.end();
-				std::map<CURL *,Request *>::iterator f = request_map.find(handle);
-				if( f == e ) {
-					printf("REQUEST NOT FOUND FOR HANDLE %p\n",handle);
-					continue;
-				}
-				curl_multi_remove_handle(curlm, handle);
-				if( result != CURLE_OK ) {
-					f->second->got_error(result,curl_easy_strerror(result));
-				} else {
-					f->second->got_done();
-				}
-				request_map.erase(f);
+		{
+			std::list<Request *>::iterator e = queue.end();
+			std::list<Request *>::iterator i = queue.begin();
+			for( ; i != e; i++ ) {
+				(*i)->step();
 			}
 		}
-
-		if( (size_t)handles >= max_handles ) {
-			return;
+		size_t handles = 0;
+		{
+			std::list<Request *>::iterator e = queue.end();
+			std::list<Request *>::iterator i = queue.begin();
+			for( ; i != e; i++ ) {
+				switch((*i)->get_state()) {
+				case kStarting:
+				case kDownloading:
+					handles++;
+				case kNone:
+				case kOK:
+				case kError:
+					break;
+				}
+			}
 		}
-
+		if( handles >= max_handles )
+			return;
 		// select a new request to start
+
 		std::list<Request *>::iterator e = queue.end();
 		std::list<Request *>::iterator i = queue.begin();
 
@@ -208,10 +259,7 @@ public:
 		// start found request
 		if( i != e && (*i)->get_state() == kNone && !(*i)->get_canceling() ) {
 			// new request found
-			CURL *handle = (*i)->start(curlsh);
-			curl_multi_add_handle(curlm, handle);
-			request_map[handle] = *i;
-			(*i)->got_started();
+			(*i)->start(curlsh);
 		}
 	}
 	const std::list<Request *> &get_queue() const { return queue; }
@@ -244,7 +292,23 @@ public:
 		return true;
 	}
 	size_t active_requests() {
-		return request_map.size();
+		size_t handles = 0;
+		{
+			std::list<Request *>::iterator e = queue.end();
+			std::list<Request *>::iterator i = queue.begin();
+			for( ; i != e; i++ ) {
+				switch((*i)->get_state()) {
+				case kStarting:
+				case kDownloading:
+					handles++;
+				case kNone:
+				case kOK:
+				case kError:
+					break;
+				}
+			}
+		}
+		return handles;
 	}
 	void stop() {
 		{
@@ -257,8 +321,6 @@ public:
 		while( active_requests() ) {
 			step();
 		}
-		curl_multi_cleanup(curlm);
-		curlm = 0;
 		curl_share_cleanup(curlsh);
 		curlsh = 0;
 	}
@@ -323,13 +385,12 @@ bool ExampleUpdate()
 		ExampleStep = 0;
 	}
 
-	if( !ExampleStep ) {
-		printf("--------------- STARTING ---------------\n");
+	if( ExampleStep == 0 ) {
 		manager.start();
 	}
 
 	manager.step();
-	ExampleStep += 1;
+	ExampleStep++;
 	if( manager.get_queue().size() < 20 ) {
 		char buf[256];
 		sprintf(buf,HTTP_TILES,matrix.get_z(),matrix.get_x(),matrix.get_y());

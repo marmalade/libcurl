@@ -11,6 +11,7 @@
 #include "IwGxPrint.h"
 #include <curl_config.h>
 #include <curl/curl.h>
+#include <ares.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -18,72 +19,177 @@ enum HTTPStatus
 {
 	kNone,
 	kStarting,
+	kResolving,
+	kStartDownload,
 	kDownloading,
+	kFinishingOK,
 	kOK,
+	kFinishingError,
 	kError,
 };
 
 const char *HTTPStatusName[] = {
 	"None",
 	"Starting",
+	"Resolving",
+	"StartDownload",
 	"Downloading",
+	"FinishingOK",
 	"OK",
+	"FinishingError",
 	"Error",
 	0
 };
 
+std::string extract_host(const std::string &url) {
+	size_t p1 = url.find("://");
+	if( p1 == std::string::npos )
+		return "";
+	p1 += 3;
+	size_t p2 = url.find(":",p1);
+	size_t p3 = url.find("/",p1);
+	if( p2 != std::string::npos && (p3 == std::string::npos || p2 < p3) ) {
+		p3 = p2;
+	}
+	if( p3 == std::string::npos )
+		return url.substr(p1);
+	return url.substr(p1,p3 - p1);
+}
+
+std::string extract_port(const std::string &url) {
+	size_t p1 = url.find("://");
+	if( p1 == std::string::npos )
+		return "";
+	p1 += 3;
+	size_t p2 = url.find(":",p1);
+	size_t p3 = url.find("/",p1);
+	if( p2 == std::string::npos )
+		return "";
+	return url.substr(p2,p3);
+}
+
+std::string extract_path(const std::string &url) {
+	size_t p1 = url.find("://");
+	if( p1 == std::string::npos )
+		return "";
+	p1 += 3;
+	size_t p3 = url.find("/",p1);
+	if( p3 == std::string::npos )
+		return "";
+	return url.substr(p3);
+}
+
+std::string extract_proto(const std::string &url) {
+	size_t p1 = url.find("://");
+	if( p1 == std::string::npos )
+		return "";
+	return url.substr(0,p1);
+}
+
 class Request {
 	CURL *curl;
-	CURLM *curlm;
+	ares_channel ares;
 	curl_slist *headers;
+	CURLM *curlm;
+	CURLSH *curlsh;
 	HTTPStatus state;
-	CURLcode errcode;
+	int errcode;
 	std::string url;
+	std::string redirect_url;
+	std::string direct_ip;
 	std::string content;
 	std::string errmsg;
 	bool canceling;
+	bool relocating;
 public:
 	Request(const char *a_url)
-		: curl(0),curlm(0),headers(0),state(kNone),errcode(CURLE_OK),url(a_url),canceling(false)
+		: curl(0),ares(0),headers(0),curlm(0),curlsh(0),
+		state(kNone),errcode(CURLE_OK),url(a_url),canceling(false),relocating(false)
 	{
 	}
 	virtual ~Request()
 	{
 		cleanup();
 	}
-	CURL *start(CURLSH *curlsh) {
+	void start(CURLM *a_curlm,CURLSH *a_curlsh) {
 		state = kStarting;
+		curlm = a_curlm;
+		curlsh = a_curlsh;
+		start_resolve();
+	}
+	void step() {
+		if( state == kResolving ) {
+			if( canceling ) {
+				ares_cancel(ares);
+			}
+			ares_process(ares, NULL, NULL);
+		}
+		if( state == kStartDownload ) {
+			if( ares )
+				ares_destroy( ares );
+			ares = 0;
+			start_curl();
+		}
+		if( state == kFinishingOK ) {
+			got_done();
+		}
+		if( state == kFinishingError ) {
+			got_error();
+		}
+		// Nothing to do with other states
+	}
+	void start_resolve() {
+		if( ares ) {
+			ares_destroy(ares);
+			ares = 0;
+		}
+		state = kResolving;
+		std::string actual_url = redirect_url.size() ? redirect_url:url;
+		ares_init(&ares);
+		ares_gethostbyname(ares,extract_host(actual_url).c_str(),AF_INET,Request::GotResolveStatic,this);
+	}
+	void start_curl() {
+		state = kDownloading;
 		curl = curl_easy_init();
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		//headers = curl_slist_append(headers,"Host: jams1.doroga.tv");
-		//curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+		//assert(direct_ip.size());
+		std::string actual_url = redirect_url.size() ? redirect_url:url;
+		char buf[1024];
+		sprintf(buf,"%s://%s%s%s",
+					extract_proto(actual_url).c_str(),
+					direct_ip.c_str(),
+					extract_port(actual_url).c_str(),
+					extract_path(actual_url).c_str());
+		curl_easy_setopt(curl, CURLOPT_URL, buf);
+		sprintf(buf,"Host: %s",extract_host(actual_url).c_str());
+		headers = curl_slist_append(headers,buf);
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Request::GotData);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)this);
 		curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-airplay-agent/1.0");
 		curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT, 15);
 		curl_easy_setopt(curl,CURLOPT_TIMEOUT, 30);
 		curl_easy_setopt(curl,CURLOPT_NOPROGRESS, 0);
-		curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 1);
-		//curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 0);
+		curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION, 0);
+
+		curl_easy_setopt(curl,CURLOPT_HEADERFUNCTION, Request::GotHeaderStatic);
+		curl_easy_setopt(curl,CURLOPT_HEADERDATA, this);
+
 		curl_easy_setopt(curl,CURLOPT_PROGRESSFUNCTION, Request::GotProgressStatic);
 		curl_easy_setopt(curl,CURLOPT_PROGRESSDATA, (void *)this);
+		//curl_easy_setopt(curl,CURLOPT_VERBOSE,1);
 		if( curlsh )
 			curl_easy_setopt(curl,CURLOPT_SHARE,curlsh);
-		curl_easy_setopt(curl,CURLOPT_VERBOSE,1);
-		curlm = curl_multi_init();
-		curl_multi_add_handle(curlm, curl);
-		got_started();
-		return curl;
+		if( curlm )
+			curl_multi_add_handle(curlm, curl);
 	}
 	void cleanup() {
 		if( curl ) {
 			curl_easy_cleanup(curl);
 		}
 		curl = 0;
-		if( curlm ) {
-			curl_multi_cleanup(curlm);
-		}
-		curlm = 0;
+		if( ares )
+			ares_destroy( ares );
+		ares = 0;
 		if( headers ) {
 			curl_slist_free_all(headers);
 		}
@@ -93,45 +199,53 @@ public:
 		url = "";
 		state = kNone;
 		canceling = false;
+		relocating = false;
 	}
-	void got_started() {
-		state = kDownloading;
+	void got_error() {
+		if( curl )
+			curl_easy_cleanup(curl);
+		curl = 0;
+		if( ares )
+			ares_destroy( ares );
+		ares = 0;
+		if( headers ) {
+			curl_slist_free_all(headers);
+		}
+		headers = 0;
+		canceling = false;
+		relocating = false;
+		state = kError;
 	}
-	void got_error(CURLcode code,const char *msg) {
+	void finish_error(int code,const char *msg) {
 		errmsg = msg;
 		errcode = code;
-		if( curl ) {
-			curl_easy_cleanup(curl);
-		}
-		curl = 0;
-		if( curlm ) {
-			curl_multi_cleanup(curlm);
-		}
-		curlm = 0;
-		if( headers ) {
-			curl_slist_free_all(headers);
-		}
-		headers = 0;
-		state = kError;
-		canceling = false;
+		state = kFinishingError;
 	}
 	void got_done() {
-		errmsg = "";
-		errcode = CURLE_OK;
-		if( curl ) {
+		if( curl )
 			curl_easy_cleanup(curl);
-		}
 		curl = 0;
-		if( curlm ) {
-			curl_multi_cleanup(curlm);
-		}
-		curlm = 0;
+		if( ares )
+			ares_destroy( ares );
+		ares = 0;
 		if( headers ) {
 			curl_slist_free_all(headers);
 		}
 		headers = 0;
-		state = kOK;
-		canceling = false;
+		if( relocating ) {
+			relocating = false;
+			state = kStarting;
+			start(curlm,curlsh);
+		} else {
+			state = kOK;
+			canceling = false;
+			relocating = false;
+		}
+	}
+	void finish_done() {
+		errmsg = "";
+		errcode = CURLE_OK;
+		state = kFinishingOK;
 	}
 	void cancel() {
 		canceling = true;
@@ -141,19 +255,130 @@ public:
 	std::string get_content() const { return content; }
 	size_t get_content_length() const { return content.size(); }
 	std::string get_errmsg() const { return errmsg; }
-	CURLcode get_errcode() const { return errcode; }
+	int get_errcode() const { return errcode; }
 	HTTPStatus get_state() const { return state; }
 	bool get_canceling() const { return canceling; }
-	CURLM *get_curlm() const { return curlm; }
+private:
+	static size_t GotData(void *ptr, size_t size, size_t nmemb, void *data)
+	{
+	  size_t realsize = size * nmemb;
+	  Request *mem = (Request *)data;
+	  return mem->GotContent(ptr,realsize);
+	}
+	size_t GotContent(void *ptr,size_t size) {
+		if( !relocating ) {
+			content += std::string((char *)ptr,size);
+		}
+		return size;
+	}
+	static int GotProgressStatic(void *clientp,double dltotal,double dlnow,double ultotal,double ulnow)
+	{
+		Request *mem = (Request *)clientp;
+		return mem->GotProgress(dltotal,dlnow,ultotal,ulnow);
+	}
+	int GotProgress(double dltotal,double dlnow,double ultotal,double ulnow)
+	{
+		return canceling ? 1:0;
+	}
+	void GotResolve(int status, int timeouts, struct hostent *hostent)
+	{
+		switch(status) {
+			case ARES_SUCCESS:
+				{
+					char buf[1024];
+					sprintf(buf,"%d.%d.%d.%d",hostent->h_addr[0],hostent->h_addr[1],hostent->h_addr[2],hostent->h_addr[3]);
+					direct_ip = buf;
+					state = kStartDownload;
+			    }
+				break;
+			case ARES_EDESTRUCTION:
+				break;
+			case ARES_ECANCELLED:
+				finish_error(status,"ARES_ECANCELLED");
+				break;
+			case ARES_ETIMEOUT:
+				finish_error(status,"ARES_ETIMEOUT");
+				break;
+			case ARES_ENOTIMP:
+				finish_error(status,"ARES_ENOTIMP");
+				break;
+			case ARES_EBADNAME:
+				finish_error(status,"ARES_EBADNAME");
+				break;
+			case ARES_ENOTFOUND:
+				finish_error(status,"ARES_ENOTFOUND");
+				break;
+			case ARES_ENOMEM:
+				finish_error(status,"ARES_ENOMEM");
+				break;
+			default:
+				finish_error(status,"ARES - UNKNOWN!");
+				break;
+		}
+	}
+	static void GotResolveStatic(void *arg, int status, int timeouts, struct hostent *hostent)
+	{
+		Request *mem = (Request *)arg;
+		mem->GotResolve(status,timeouts,hostent);
+	}
+	size_t GotHeader(const char *ptr,size_t size)
+	{
+		if( !memcmp(ptr,"Location:",sizeof("Location:")-1) ) {
+			long code = 0;
+			curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&code);
+			if( code >= 300 && code < 400 ) {
+				printf("Relocation happening\n");
+				relocating = true;
+				redirect_url = std::string(ptr+sizeof("Location:"),size - sizeof("Location:") - 2);
+				while( redirect_url[0] == ' ' )
+					redirect_url = redirect_url.substr(1);
+			}
+		}
+		return size;
+	}
+	static size_t GotHeaderStatic( void *ptr, size_t size, size_t nmemb, void *userdata)
+	{
+		Request *mem = (Request *)userdata;
+		return mem->GotHeader((const char *)ptr,size*nmemb);
+	}
+};
 
+class RequestManager {
+	std::list<Request *> queue;
+	CURLM *curlm;
+	CURLSH *curlsh;
+	size_t max_handles;
+public:
+	RequestManager(size_t a_max_handles)
+		: curlm(0),curlsh(0),max_handles(a_max_handles)
+	{
+	}
+	size_t get_max_handles() const { return max_handles; }
+	CURLM *start()
+	{
+		//curlsh = curl_share_init();
+		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
+		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_DNS);
+		return curlm = curl_multi_init();
+	}
+	CURLM *get_curlm() const {
+		return curlm;
+	}
+	void get(const char *url) {
+		Request *r = new Request(url);
+		queue.push_back(r);
+	}
 	void step() {
-		if( !curl || !curlm )
+		if( !curlm ) {
+			printf("CURLM SHOULD BE INITIALIZED, call start() before!!!\n");
 			return;
-		switch( state ) {
-		case kNone:
-		case kOK:
-		case kError:
-			return;
+		}
+		{
+			std::list<Request *>::iterator e= queue.end();
+			std::list<Request *>::iterator i= queue.begin();
+			for( ; i != e; i++ ) {
+				(*i)->step();
+			}
 		}
 		int handles = 0;
 		CURLMcode code = CURLM_OK;
@@ -170,85 +395,33 @@ public:
 		while ((msg = curl_multi_info_read(curlm, &msgs_left))) {
 			if (msg->msg == CURLMSG_DONE) {
 				CURLcode result = msg->data.result;
-				curl_multi_remove_handle(curlm, curl);
+				CURL *handle = msg->easy_handle;
+				std::list<Request *>::iterator e= queue.end();
+				std::list<Request *>::iterator f= queue.begin();
+				for( ; f != e; f++ ) {
+					if( (*f)->get_curl() == handle )
+						break;
+				}
+				if( f == e ) {
+					printf("REQUEST NOT FOUND FOR HANDLE %p\n",handle);
+					continue;
+				}
+				curl_multi_remove_handle(curlm, handle);
 				if( result != CURLE_OK ) {
-					got_error(result,curl_easy_strerror(result));
+					(*f)->finish_error(result,curl_easy_strerror(result));
 				} else {
-					got_done();
+					(*f)->finish_done();
 				}
 			}
 		}
-	}
-private:
-	static size_t GotData(void *ptr, size_t size, size_t nmemb, void *data)
-	{
-	  size_t realsize = size * nmemb;
-	  Request *mem = (Request *)data;
-	  return mem->GotContent(ptr,realsize);
-	}
-	size_t GotContent(void *ptr,size_t size) {
-		content += std::string((char *)ptr,size);
-		return size;
-	}
-	static int GotProgressStatic(void *clientp,double dltotal,double dlnow,double ultotal,double ulnow)
-	{
-		Request *mem = (Request *)clientp;
-		return mem->GotProgress(dltotal,dlnow,ultotal,ulnow);
-	}
-	int GotProgress(double dltotal,double dlnow,double ultotal,double ulnow)
-	{
-		return canceling ? 1:0;
-	}
-};
 
-class RequestManager {
-	std::list<Request *> queue;
-	CURLSH *curlsh;
-	size_t max_handles;
-public:
-	RequestManager(size_t a_max_handles)
-		: curlsh(0),max_handles(a_max_handles)
-	{
-	}
-	size_t get_max_handles() const { return max_handles; }
-	void start()
-	{
-		//curlsh = curl_share_init();
-		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_COOKIE);
-		//curl_share_setopt(curlsh,CURLSHOPT_SHARE,CURL_LOCK_DATA_DNS);
-	}
-	void get(const char *url) {
-		Request *r = new Request(url);
-		queue.push_back(r);
-	}
-	void step() {
-		{
-			std::list<Request *>::iterator e = queue.end();
-			std::list<Request *>::iterator i = queue.begin();
-			for( ; i != e; i++ ) {
-				(*i)->step();
-			}
-		}
-		size_t handles = 0;
-		{
-			std::list<Request *>::iterator e = queue.end();
-			std::list<Request *>::iterator i = queue.begin();
-			for( ; i != e; i++ ) {
-				switch((*i)->get_state()) {
-				case kStarting:
-				case kDownloading:
-					handles++;
-				case kNone:
-				case kOK:
-				case kError:
-					break;
-				}
-			}
-		}
-		if( handles >= max_handles )
+		if( (size_t)handles >= max_handles ) {
 			return;
+		}
+		if( active_requests() >= max_handles ) {
+			return;
+		}
 		// select a new request to start
-
 		std::list<Request *>::iterator e = queue.end();
 		std::list<Request *>::iterator i = queue.begin();
 
@@ -259,14 +432,17 @@ public:
 		// start found request
 		if( i != e && (*i)->get_state() == kNone && !(*i)->get_canceling() ) {
 			// new request found
-			(*i)->start(curlsh);
+			(*i)->start(curlm,curlsh);
 		}
 	}
 	const std::list<Request *> &get_queue() const { return queue; }
 	bool clean(Request *r) {
 		switch(r->get_state()) {
 		case kStarting:
+		case kResolving:
 		case kDownloading:
+		case kFinishingError:
+		case kFinishingOK:
 			r->cancel();
 			return false; // not in this state - cancel request before
 		case kNone:
@@ -292,23 +468,24 @@ public:
 		return true;
 	}
 	size_t active_requests() {
-		size_t handles = 0;
-		{
-			std::list<Request *>::iterator e = queue.end();
-			std::list<Request *>::iterator i = queue.begin();
-			for( ; i != e; i++ ) {
-				switch((*i)->get_state()) {
+		size_t r = 0;
+		std::list<Request *>::iterator e = queue.end();
+		std::list<Request *>::iterator i = queue.begin();
+
+		for( ; i != e; i++ ) {
+			switch( (*i)->get_state() ) {
 				case kStarting:
+				case kResolving:
+				case kStartDownload:
 				case kDownloading:
-					handles++;
-				case kNone:
-				case kOK:
-				case kError:
+				case kFinishingOK:
+				case kFinishingError:
+					r++;
+				default:
 					break;
-				}
 			}
 		}
-		return handles;
+		return r;
 	}
 	void stop() {
 		{
@@ -320,7 +497,10 @@ public:
 		}
 		while( active_requests() ) {
 			step();
+			s3eDeviceYield(0);
 		}
+		curl_multi_cleanup(curlm);
+		curlm = 0;
 		curl_share_cleanup(curlsh);
 		curlsh = 0;
 	}
@@ -378,19 +558,20 @@ int ExampleStep = 0;
 
 bool ExampleUpdate()
 {
-	if( ExampleStep >= 10 ) {
+	if( ExampleStep >= 30 ) {
 		manager.stop();
 		while( manager.get_queue().begin() != manager.get_queue().end() )
 			manager.clean(*manager.get_queue().begin());
 		ExampleStep = 0;
 	}
 
-	if( ExampleStep == 0 ) {
+	if( !ExampleStep ) {
+		printf("--------------- STARTING ---------------\n");
 		manager.start();
 	}
 
 	manager.step();
-	ExampleStep++;
+	ExampleStep += 1;
 	if( manager.get_queue().size() < 20 ) {
 		char buf[256];
 		sprintf(buf,HTTP_TILES,matrix.get_z(),matrix.get_x(),matrix.get_y());
@@ -418,6 +599,7 @@ bool ExampleUpdate()
 			}
 		}
 	}
+	s3eDeviceYield(0);
 	return true;
 }
 
