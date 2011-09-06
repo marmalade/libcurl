@@ -14,6 +14,8 @@
 #include <ares.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 enum HTTPStatus
 {
@@ -85,6 +87,72 @@ std::string extract_proto(const std::string &url) {
 		return "";
 	return url.substr(0,p1);
 }
+class DnsCache
+{
+	struct DnsCacheEntry {
+		int64_t last_update;
+		std::string result;
+		DnsCacheEntry()
+			: last_update(s3eTimerGetUTC())
+		{
+		}
+		DnsCacheEntry(const std::string &a_result)
+			: last_update(s3eTimerGetUTC()),
+			result(a_result)
+		{
+		}
+		DnsCacheEntry(const std::string &a_result,int64_t a_last_update)
+			: last_update(a_last_update),
+			result(a_result)
+		{
+		}
+		DnsCacheEntry(const DnsCacheEntry &a)
+			: last_update(a.last_update),
+			result(a.result)
+		{
+		}
+		DnsCacheEntry &operator=(const DnsCacheEntry &a)
+		{
+			last_update = a.last_update;
+			result = a.result;
+			return *this;
+		}
+	};
+	std::map<std::string,DnsCacheEntry> dns_cache;
+
+	// Forbid copying
+	DnsCache(const DnsCache &);
+	DnsCache &operator=(const DnsCache &);
+public:
+	DnsCache() {
+	}
+	virtual ~DnsCache() {
+	}
+
+	std::string get_ent(const std::string &hostname) const {
+		std::map<std::string,DnsCacheEntry>::const_iterator e = dns_cache.end();
+		std::map<std::string,DnsCacheEntry>::const_iterator f = dns_cache.find(hostname);
+		if( f == e )
+			return "";
+#ifdef _DEBUG
+		int64_t fresh = 30 * 1000;
+#else
+		int64_t fresh = 300 * 1000;
+#endif
+		if( s3eTimerGetUTC() - f->second.last_update >= fresh )
+			return "";
+		return f->second.result;
+	}
+	void add_ent(const std::string &hostname, const std::string &ent) {
+		dns_cache[hostname].result = ent;
+	}
+	void add_ent(const std::string &hostname, int32_t result) {
+		add_ent(hostname,std::string((char *)&result,4));
+	}
+	void add_ent(const std::string &hostname, hostent *result) {
+		add_ent(hostname,std::string((char *)&result->h_addr,result->h_length));
+	}
+};
 
 class Request {
 	CURL *curl;
@@ -92,6 +160,7 @@ class Request {
 	curl_slist *headers;
 	CURLM *curlm;
 	CURLSH *curlsh;
+	DnsCache *dns_cache;
 	HTTPStatus state;
 	int errcode;
 	std::string url;
@@ -103,7 +172,7 @@ class Request {
 	bool relocating;
 public:
 	Request(const char *a_url)
-		: curl(0),ares(0),headers(0),curlm(0),curlsh(0),
+		: curl(0),ares(0),headers(0),curlm(0),curlsh(0),dns_cache(0),
 		state(kNone),errcode(CURLE_OK),url(a_url),canceling(false),relocating(false)
 	{
 	}
@@ -111,18 +180,35 @@ public:
 	{
 		cleanup();
 	}
-	void start(CURLM *a_curlm,CURLSH *a_curlsh) {
+	void start(CURLM *a_curlm,CURLSH *a_curlsh,DnsCache *a_dns_cache) {
 		state = kStarting;
 		curlm = a_curlm;
 		curlsh = a_curlsh;
+		dns_cache = a_dns_cache;
 		start_resolve();
 	}
 	void step() {
 		if( state == kResolving ) {
-			if( canceling ) {
-				ares_cancel(ares);
+			if( ares ) {
+				if( canceling ) {
+					ares_cancel(ares);
+				}
+				int nfds, count;
+				fd_set readers, writers;
+				struct timeval tv, maxtv, *tvp;
+				FD_ZERO(&readers);
+				FD_ZERO(&writers);
+				nfds = ares_fds(ares, &readers, &writers);
+				maxtv.tv_sec = 0;
+				maxtv.tv_usec = 1000;
+				if (nfds == 0) {
+					ares_process(ares, NULL, NULL);
+				} else {
+					tvp = ares_timeout(ares, &maxtv, &tv);
+					count = select(nfds, &readers, &writers, NULL, tvp);
+					ares_process(ares, &readers, &writers);
+				}
 			}
-			ares_process(ares, NULL, NULL);
 		}
 		if( state == kStartDownload ) {
 			if( ares )
@@ -145,8 +231,17 @@ public:
 		}
 		state = kResolving;
 		std::string actual_url = redirect_url.size() ? redirect_url:url;
-		ares_init(&ares);
-		ares_gethostbyname(ares,extract_host(actual_url).c_str(),AF_INET,Request::GotResolveStatic,this);
+		std::string host = extract_host(actual_url);
+		std::string res = dns_cache->get_ent(host);
+		if( !res.size() ) {
+			ares_init(&ares);
+			ares_gethostbyname(ares,host.c_str(),AF_INET,Request::GotResolveStatic,this);
+		} else {
+			char buf[1024];
+			sprintf(buf,"%d.%d.%d.%d",res[0],res[1],res[2],res[3]);
+			direct_ip = buf;
+			state = kStartDownload;
+		}
 	}
 	void start_curl() {
 		state = kDownloading;
@@ -160,7 +255,7 @@ public:
 					extract_port(actual_url).c_str(),
 					extract_path(actual_url).c_str());
 		curl_easy_setopt(curl, CURLOPT_URL, buf);
-		sprintf(buf,"Host: %s",extract_host(actual_url).c_str());
+		sprintf(buf,"Host: %s%s",extract_host(actual_url).c_str(),extract_port(actual_url).c_str());
 		headers = curl_slist_append(headers,buf);
 		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Request::GotData);
@@ -235,7 +330,7 @@ public:
 		if( relocating ) {
 			relocating = false;
 			state = kStarting;
-			start(curlm,curlsh);
+			start(curlm,curlsh,dns_cache);
 		} else {
 			state = kOK;
 			canceling = false;
@@ -289,6 +384,8 @@ private:
 					sprintf(buf,"%d.%d.%d.%d",hostent->h_addr[0],hostent->h_addr[1],hostent->h_addr[2],hostent->h_addr[3]);
 					direct_ip = buf;
 					state = kStartDownload;
+					std::string actual_url = redirect_url.size() ? redirect_url:url;
+					dns_cache->add_ent(extract_host(actual_url),hostent);
 			    }
 				break;
 			case ARES_EDESTRUCTION:
@@ -347,6 +444,7 @@ class RequestManager {
 	std::list<Request *> queue;
 	CURLM *curlm;
 	CURLSH *curlsh;
+	DnsCache dns_cache;
 	size_t max_handles;
 public:
 	RequestManager(size_t a_max_handles)
@@ -432,7 +530,7 @@ public:
 		// start found request
 		if( i != e && (*i)->get_state() == kNone && !(*i)->get_canceling() ) {
 			// new request found
-			(*i)->start(curlm,curlsh);
+			(*i)->start(curlm,curlsh,&dns_cache);
 		}
 	}
 	const std::list<Request *> &get_queue() const { return queue; }
@@ -558,7 +656,7 @@ int ExampleStep = 0;
 
 bool ExampleUpdate()
 {
-	if( ExampleStep >= 30 ) {
+	if( ExampleStep >= 100 ) {
 		manager.stop();
 		while( manager.get_queue().begin() != manager.get_queue().end() )
 			manager.clean(*manager.get_queue().begin());

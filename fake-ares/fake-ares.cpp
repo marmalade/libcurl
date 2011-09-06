@@ -114,7 +114,7 @@ namespace __ares_internal__ {
 			s3eInetIPAddress result;
 			int64 last_update;
 		};
-		std::map<std::string,DnsCacheEntry> dns_cache;
+		//std::map<std::string,DnsCacheEntry> dns_cache;
 		//int dummy_socket;
 		//int debug_step_counter;
 
@@ -157,7 +157,7 @@ namespace __ares_internal__ {
 			}
 			return s;
 		}
-
+/*
 		bool check_cache(const char *name,ares_host_callback callback,void *arg) {
 #ifdef _DEBUG
 			int64 expire = 30 * 1000;
@@ -184,7 +184,7 @@ namespace __ares_internal__ {
 			}
 			return false;
 		}
-
+*/
 		void check_result(Queue *channel) {
 			if( status == OUTSTANDING ) { // outstanding request
 				//debug_step_counter++;
@@ -212,8 +212,8 @@ namespace __ares_internal__ {
 						ent.h_addr_list = addr_list;
 						ent.h_aliases = aliases;
 						ent.h_addrtype = AF_INET;
-						DnsCacheEntry entry = { result, s3eTimerGetUTC() };
-						dns_cache[current->first()->host] = entry;
+						//DnsCacheEntry entry = { result, s3eTimerGetUTC() };
+						//dns_cache[current->first()->host] = entry;
 						current->first_done(ARES_SUCCESS,&ent);
 						//delete [] hostname;
 					}
@@ -351,8 +351,8 @@ void ares_gethostbyname(ares_channel channel,
                                      ares_host_callback callback,
                                      void *arg)
 {
-	if( QueueManager::manager()->check_cache(name,callback,arg) )
-		return;
+//	if( QueueManager::manager()->check_cache(name,callback,arg) )
+//		return;
 	Queue *q = (Queue *)channel;
 	q->add(name,s3eTimerGetUTC()+5000,callback,arg);
 	QueueManager::manager()->step(q);
@@ -428,6 +428,12 @@ void ares_process_fd(ares_channel channel,
 	QueueManager::manager()->step(q);
 }
 
+int ares_fds(ares_channel channel,
+                          fd_set *read_fds,
+                          fd_set *write_fds)
+{
+	return 0;
+}
 
 
 const char *ares_strerror(int code)
