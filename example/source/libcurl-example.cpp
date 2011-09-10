@@ -136,6 +136,10 @@ class RequestManager {
 	CURLM *curlm;
 	CURLSH *curlsh;
 	size_t max_handles;
+	struct ForDone {
+		CURL *handle;
+		CURLcode result;
+	};
 public:
 	RequestManager(size_t a_max_handles)
 		: curlm(0),curlsh(0),max_handles(a_max_handles)
@@ -173,10 +177,20 @@ public:
 		CURLMsg *msg; /* for picking up messages with the transfer status */
 		int msgs_left; /* how many messages are left */
 
+		std::list<ForDone> handles_for_done;
 		while ((msg = curl_multi_info_read(curlm, &msgs_left))) {
 			if (msg->msg == CURLMSG_DONE) {
-				CURLcode result = msg->data.result;
-				CURL *handle = msg->easy_handle;
+				ForDone d = { msg->easy_handle,msg->data.result };
+			}
+			if( msgs_left == 0 )
+				break;
+		}
+		{
+			std::list<ForDone>::iterator e=handles_for_done.end();
+			std::list<ForDone>::iterator i=handles_for_done.begin();
+			for( ; i != e; i++ ) {
+				CURLcode result = i->result;
+				CURL *handle = i->handle;
 				std::map<CURL *,Request *>::iterator e = request_map.end();
 				std::map<CURL *,Request *>::iterator f = request_map.find(handle);
 				if( f == e ) {

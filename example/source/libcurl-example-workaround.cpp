@@ -135,7 +135,7 @@ public:
 		if( f == e )
 			return "";
 #ifdef _DEBUG
-		int64_t fresh = 30 * 1000;
+		int64_t fresh = 3 * 1000;
 #else
 		int64_t fresh = 300 * 1000;
 #endif
@@ -145,12 +145,13 @@ public:
 	}
 	void add_ent(const std::string &hostname, const std::string &ent) {
 		dns_cache[hostname].result = ent;
+		dns_cache[hostname].last_update = s3eTimerGetUTC();
 	}
 	void add_ent(const std::string &hostname, int32_t result) {
 		add_ent(hostname,std::string((char *)&result,4));
 	}
 	void add_ent(const std::string &hostname, hostent *result) {
-		add_ent(hostname,std::string((char *)&result->h_addr,result->h_length));
+		add_ent(hostname,std::string((char *)(result->h_addr),result->h_length));
 	}
 };
 
@@ -511,6 +512,8 @@ public:
 					(*f)->finish_done();
 				}
 			}
+			if( msgs_left == 0 )
+				break;
 		}
 
 		if( (size_t)handles >= max_handles ) {
