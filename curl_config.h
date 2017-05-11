@@ -1,5 +1,8 @@
 /* lib/curl_config.h.in.  Generated manually  */
 
+// disable for build on MacOS with Xcode (http://www.madewithmarmalade.com/devnet/forum/7128)
+#define CURL_DISABLE_FILE
+
 /* when building libcurl itself */
 //#undef BUILDING_LIBCURL
 
